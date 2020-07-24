@@ -15,7 +15,7 @@ from torchvision import transforms
 from utils.utils import get_key_def, pad, minmax_scale, BGR_to_RGB
 
 
-def compose_transforms(params, dataset, type='', ignore_index=None):
+def compose_transforms(params, dataset, type='', ignore_index=None, random_radiom_trim_range=None):
     """
     Function to compose the transformations to be applied on every batches.
     :param params: (dict) Parameters found in the yaml config file
@@ -27,7 +27,7 @@ def compose_transforms(params, dataset, type='', ignore_index=None):
     scale = get_key_def('scale_data', params['global'], None)
     norm_mean = get_key_def('mean', params['training']['normalization'])
     norm_std = get_key_def('std', params['training']['normalization'])
-    random_radiom_trim_range = get_key_def('random_radiom_trim_range', params['training']['augmentation'], None)
+    # random_radiom_trim_range = get_key_def('random_radiom_trim_range', params['training']['augmentation'], None)
 
     if dataset == 'trn':
 
@@ -35,7 +35,8 @@ def compose_transforms(params, dataset, type='', ignore_index=None):
             noise = get_key_def('noise', params['training']['augmentation'], None)
 
             if random_radiom_trim_range:  # Contrast stretching
-                lst_trans.append(RadiometricTrim(random_range=random_radiom_trim_range))  # FIXME: test this. Assure compatibility with CRIM devs (don't trim metadata)
+                lst_trans.append(RadiometricTrim(
+                    random_range=random_radiom_trim_range))  # FIXME: test this. Assure compatibility with CRIM devs (don't trim metadata)
 
             if noise:
                 raise NotImplementedError
@@ -60,7 +61,7 @@ def compose_transforms(params, dataset, type='', ignore_index=None):
                 lst_trans.append(RandomCrop(sample_size=crop_size, ignore_index=ignore_index))
 
     if type == 'totensor':
-        if not dataset == 'trn' and random_radiom_trim_range:  # Contrast stretching at eval. Use mean of provided range
+        if not dataset == 'trn' and random_radiom_trim_range is not None:  # Contrast stretching at eval. Use mean of provided range
             RadiometricTrim.input_checker(random_radiom_trim_range)  # Assert range is number or 2 element sequence
             if isinstance(random_radiom_trim_range, numbers.Number):
                 trim_at_eval = random_radiom_trim_range
@@ -74,7 +75,8 @@ def compose_transforms(params, dataset, type='', ignore_index=None):
             lst_trans.append(Normalize(mean=params['training']['normalization']['mean'],
                                        std=params['training']['normalization']['std']))
 
-        lst_trans.append(ToTensorTarget(get_key_def('BGR_to_RGB', params['global'], False))) # Send channels first, convert numpy array to torch tensor
+        lst_trans.append(ToTensorTarget(get_key_def('BGR_to_RGB', params['global'],
+                                                    False)))  # Send channels first, convert numpy array to torch tensor
 
     return transforms.Compose(lst_trans)
 
@@ -83,13 +85,14 @@ class RadiometricTrim(object):
     """Trims values left and right of the raster's histogram. Also called linear scaling or enhancement.
     Percentile, chosen randomly based on inputted range, applies to both left and right sides of the histogram.
     Ex.: Values below the 1.7th and above the 98.3th percentile will be trimmed if random value is 1.7"""
+
     def __init__(self, random_range):
         """
         @param random_range: numbers.Number (float or int) or Sequence (list or tuple) with length of 2
         """
         random_range = self.input_checker(random_range)
         self.range = random_range
-        
+
     @staticmethod
     def input_checker(input_param):
         if not isinstance(input_param, (numbers.Number, Sequence)):
@@ -105,6 +108,7 @@ class RadiometricTrim(object):
 
     def __call__(self, sample):
         # Choose trimming percentile withing inputted range
+        print(f"DEBUG: augmentation.py - ligne 108 - Trimming between {self.range}")
         trim = round(random.uniform(self.range[0], self.range[-1]), 1)
         # Determine output range from datatype
         out_dtype = sample['metadata']['dtype']
@@ -117,7 +121,7 @@ class RadiometricTrim(object):
             # Determine what is the index of nonzero pixel corresponding to left and right trim percentile
             sum_nonzero_pix_per_band = sum(band_histogram)
             left_pixel_idx = round(sum_nonzero_pix_per_band / 100 * trim)
-            right_pixel_idx = round(sum_nonzero_pix_per_band / 100 * (100-trim))
+            right_pixel_idx = round(sum_nonzero_pix_per_band / 100 * (100 - trim))
             cumulative_pixel_count = 0
             # TODO: can this for loop be optimized? Also, this hasn't been tested with non 8-bit data. Should be fine though.
             # Loop through pixel values of given histogram
@@ -131,7 +135,8 @@ class RadiometricTrim(object):
                     right_pix_val = pixel_val
                 cumulative_pixel_count += count_per_pix_val
             # Enhance using above left and right pixel values as in_range
-            rescaled_band = exposure.rescale_intensity(band, in_range=(left_pix_val, right_pix_val), out_range=out_dtype)
+            rescaled_band = exposure.rescale_intensity(band, in_range=(left_pix_val, right_pix_val),
+                                                       out_range=out_dtype)
             # Write each enhanced band to empty array
             rescaled_sat_img[:, :, band_idx] = rescaled_band
         sample['sat_img'] = rescaled_sat_img
@@ -143,6 +148,7 @@ class Scale(object):
     Scale array values from range [0,255]  or [0,65535] to values in config (e.g. [0,1])
     Guidelines for pre-processing: http://cs231n.github.io/neural-networks-2/#datapre
     """
+
     def __init__(self, range):
         if isinstance(range, Sequence) and len(range) == 2:
             self.sc_min = range[0]
@@ -170,7 +176,6 @@ class Scale(object):
                              f"{min_val} to {max_val}.")
         return orig_range
 
-
     def __call__(self, sample):
         """
         Args:
@@ -181,20 +186,22 @@ class Scale(object):
         """
         out_dtype = sample['metadata']['dtype']
         orig_range = self.range_values_raster(sample['sat_img'], out_dtype)
-        sample['sat_img'] = minmax_scale(img=sample['sat_img'], orig_range=orig_range, scale_range=(self.sc_min, self.sc_max))
+        sample['sat_img'] = minmax_scale(img=sample['sat_img'], orig_range=orig_range,
+                                         scale_range=(self.sc_min, self.sc_max))
 
         return sample
 
 
 class GeometricScale(object):
     """Randomly resize image according to a certain range."""
+
     def __init__(self, range):
         self.range = range
 
     def __call__(self, sample):
         scale_factor = round(random.uniform(range[0], range[-1]), 1)
         output_width = sample['sat_img'].shape[0] * scale_factor
-        output_height =  sample['sat_img'].shape[1] * scale_factor
+        output_height = sample['sat_img'].shape[1] * scale_factor
         sat_img = transform.resize(sample['sat_img'], output_shape=(output_height, output_width))
         map_img = transform.resize(sample['map_img'], output_shape=(output_height, output_width))
         sample['sat_img'] = sat_img
@@ -204,6 +211,7 @@ class GeometricScale(object):
 
 class RandomRotationTarget(object):
     """Rotate the image and target randomly."""
+
     def __init__(self, limit, prob, ignore_index):
         self.limit = limit
         self.prob = prob
@@ -223,6 +231,7 @@ class RandomRotationTarget(object):
 
 class HorizontalFlip(object):
     """Flip the input image and reference map horizontally, with a probability."""
+
     def __init__(self, prob):
         self.prob = prob
 
@@ -235,10 +244,12 @@ class HorizontalFlip(object):
         return sample
 
 
-class RandomCrop(object):  # TODO: what to do with overlap in samples_prep (images_to_samples, l.106)? overlap doesn't need to be larger than, say, 5%
+class RandomCrop(
+    object):  # TODO: what to do with overlap in samples_prep (images_to_samples, l.106)? overlap doesn't need to be larger than, say, 5%
     """Randomly crop image according to a certain dimension.
     Adapted from https://pytorch.org/docs/stable/_modules/torchvision/transforms/transforms.html#RandomCrop
     to support >3 band images (not currently supported by PIL)"""
+
     def __init__(self, sample_size, padding=3, pad_if_needed=True, ignore_index=0):
         if isinstance(sample_size, numbers.Number):
             self.size = (int(sample_size), int(sample_size))
@@ -312,6 +323,7 @@ class RandomCrop(object):  # TODO: what to do with overlap in samples_prep (imag
 
 class Normalize(object):
     """Normalize Image with Mean and STD and similar to Pytorch(transform.Normalize) function """
+
     def __init__(self, mean, std):
         self.mean = mean
         self.std = std
@@ -327,6 +339,7 @@ class Normalize(object):
 
 class ToTensorTarget(object):
     """Convert ndarrays in sample to Tensors."""
+
     def __init__(self, bgr_to_rgb):
         self.bgr_to_rgb = bgr_to_rgb
 

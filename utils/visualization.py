@@ -79,7 +79,7 @@ def vis_from_batch(params, inputs, outputs, batch_index, vis_path, labels=None, 
             debug=debug)
 
 
-def vis(params, input, output, vis_path, sample_num=0, label=None, dataset='', ep_num=0, inference_input_path=False, debug=False):
+def vis(params, input, output, vis_path, sample_num=0, label=None, dataset='', ep_num=0, trim="", inference_input_path=False, debug=False):
     """saves input, output and label (if given) as .png in a grid or as individual pngs
     :param params: parameters from .yaml config file
     :param input: (tensor) input array as pytorch tensor, e.g. as returned by dataloader
@@ -152,7 +152,7 @@ def vis(params, input, output, vis_path, sample_num=0, label=None, dataset='', e
         if debug and len(np.unique(output_argmax)) == 1:
             warnings.warn(f'Inference contains only {np.unique(output_argmax)} value. Make sure data scale '
                           f'{scale} is identical with scale used for training model.')
-        output_name = vis_path.joinpath(f"{inference_input_path.stem}_inference.tif")
+        output_name = vis_path.joinpath(f"{inference_input_path.stem}_inference_trim{trim}.tif")
         create_new_raster_from_base(inference_input_path, output_name, output_argmax)
 
         if heatmaps_inf:
