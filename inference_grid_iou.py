@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import torch
 import torch.nn.functional as F
 # import torch should be first. Unclear issue, mentionned here: https://github.com/pytorch/pytorch/issues/2083
@@ -296,6 +298,7 @@ def main(params):
     model, state_dict_path, model_name = net(params, num_channels=num_classes_corrected, inference=True)
 
     num_devices = params['global']['num_gpus'] if params['global']['num_gpus'] else 0
+    print(f"DEBUG - Requested {num_devices} GPUs")
     # list of GPU devices that are available and unused. If no GPUs, returns empty list
     lst_device_ids = get_device_ids(num_devices) if torch.cuda.is_available() else []
     device = torch.device(f'cuda:{lst_device_ids[0]}' if torch.cuda.is_available() and lst_device_ids else 'cpu')
@@ -397,15 +400,22 @@ def main(params):
                         "global configuration requested metadata mapping onto loaded samples, but raster did not have available metadata"
                     metadata = read_parameters(info['meta'])
 
-                range_trim_vals = np.arange(0,3.1,0.1)
-                for i in range_trim_vals:
-                    trim_at_inference = round(i, 1)
-                    #random_radiom_trim_range = get_key_def('random_radiom_trim_range', params['training']['augmentation'], None)
-                    #if random_radiom_trim_range is not None:  # TODO: test this
-                    #    trim_at_inference = round((random_radiom_trim_range[-1]-random_radiom_trim_range[0])/2, 1)
-                    #    radiom_scaling = RadiometricTrim(random_range=[trim_at_inference, trim_at_inference])
-                    radiom_scaling = RadiometricTrim(random_range=[trim_at_inference, trim_at_inference])
-                    inf_sample = radiom_scaling(inf_sample)
+                list_trim_vals = [None]
+                trim_vals = np.arange(0, 0.7, 0.1)
+                list_trim_vals.extend(list(trim_vals))
+
+                for i in list_trim_vals:
+                    trim_at_inference = None
+                    if i is not None:
+                        trim_at_inference = round(i, 1)
+                        #random_radiom_trim_range = get_key_def('random_radiom_trim_range', params['training']['augmentation'], None)
+                        #if random_radiom_trim_range is not None:  # TODO: test this
+                        #    trim_at_inference = round((random_radiom_trim_range[-1]-random_radiom_trim_range[0])/2, 1)
+                        #    radiom_scaling = RadiometricTrim(random_range=[trim_at_inference, trim_at_inference])
+                        radiom_scaling = RadiometricTrim(random_range=[trim_at_inference, trim_at_inference])
+                        inf_sample = radiom_scaling(inf_sample)
+                    else:
+                        print("DEBUG - inference_grid_iou 416 - No trimming applied")
 
                     if debug:
                         output_name = working_folder / f'{local_img.stem}_linscale{str(trim_at_inference).replace(".","")}.TIF'
@@ -455,16 +465,18 @@ def main(params):
 
                     if info['gpkg'] is not None:
                         inf_log.add_values(inf_metrics, _tqdm.n)
-                        output_name = working_folder / f'{local_img.stem}_grid_iou.TIF'
-                        create_new_raster_from_base(local_img, output_name, output_iou.astype('uint8'))
-                        metrics = [trim_at_inference]
+                        #output_name = working_folder / f'{local_img.stem}_grid_iou.TIF'
+                        #create_new_raster_from_base(local_img, output_name, output_iou.astype('uint8'))
+                        csv_row = [img_name, trim_at_inference] # first, add image name and trim value that was used
                         for key in inf_metrics.keys():
                             if "iou" in key:
-                                metrics.append(inf_metrics[key].avg)
+                                csv_row.append(inf_metrics[key].avg)
+                        now = "{:%Y_%m_%d_%H_%M_%S}".format(datetime.now())
+                        csv_row.append(now)
                         # Write to the csv file ('a' means append)
                         of_connection = open(out_file, 'a')
                         writer = csv.writer(of_connection, delimiter=';')
-                        writer.writerow(metrics)
+                        writer.writerow(csv_row)
                         of_connection.close()
 
                     # CREATE GEOTIF FROM METADATA OF ORIGINAL IMAGE

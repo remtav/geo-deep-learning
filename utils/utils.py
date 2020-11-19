@@ -78,12 +78,18 @@ def list_s3_subfolders(bucket, data_path):
     return list_classes
 
 
-def get_device_ids(number_requested, max_used_ram=2000, max_used_perc=15, debug=False):
+def get_device_ids(number_requested: int, max_used_ram: int = 25, max_used_perc: int = 30, debug=False):
     """
     Function to check which GPU devices are available and unused.
-    :param number_requested: (int) Number of devices requested.
+    :param number_requested:
     :return: (list) Unused GPU devices.
+    @param number_requested: (int) Number of devices requested.
+    @param max_used_ram: (int) maximum usage of GPU RAM above which GPU is considered unavailable
+    @param max_used_perc: (int) maximum usage of GPU above which GPU is considered unavailable
+    @param debug: if True, prints info about detected GPUs
     """
+    assert 0 <= max_used_ram <= 100, f"Invalid value for max used GPU ram: {max_used_ram}"
+    assert 0 <= max_used_perc <= 100, f"Invalid value for max usage of GPU: {max_used_perc}"
     lst_free_devices = []
     try:
         nvmlInit()
@@ -91,9 +97,10 @@ def get_device_ids(number_requested, max_used_ram=2000, max_used_perc=15, debug=
             device_count = nvmlDeviceGetCount()
             for i in range(device_count):
                 res, mem = gpu_stats(i)
+                ram_used = mem.used / (1024 ** 2) / (mem.total / (1024 ** 2)) * 100
                 if debug:
-                    print(f'GPU RAM used: {round(mem.used/(1024**2), 1)} | GPU % used: {res.gpu}')
-                if round(mem.used/(1024**2), 1) <  max_used_ram and res.gpu < max_used_perc:
+                    print(f'GPU % RAM used: {ram_used:.0f} | GPU % used: {res.gpu}')
+                if round(ram_used, 1) < max_used_ram and res.gpu < max_used_perc:
                     lst_free_devices.append(i)
                 if len(lst_free_devices) == number_requested:
                     break
